@@ -54,7 +54,7 @@ def daily():
         <option>Miss</option>
       </select><br><br>
       Note:<br><textarea name="note"></textarea><br><br>
-      <button type="submit">Save</button>
+      <button>Save</button>
     </form>
     <br><a href="/dashboard">⬅ Dashboard</a>
     </body></html>
@@ -82,43 +82,33 @@ def save(
     return RedirectResponse("/dashboard", status_code=303)
 
 # =====================
-# DASHBOARD
+# DASHBOARD (YEAR OVERVIEW)
 # =====================
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard(month: str = None, year: str = None):
+def dashboard():
     conn = sqlite3.connect(DB)
-
-    # ----- safe filter -----
-    where = ""
-    params = []
-    try:
-        if month and year:
-            m = int(month)
-            y = int(year)
-            where = "WHERE strftime('%m', day)=? AND strftime('%Y', day)=?"
-            params = [f"{m:02d}", str(y)]
-    except ValueError:
-        pass
 
     total = conn.execute("SELECT COUNT(*) FROM routines").fetchone()[0]
     done = conn.execute("SELECT COUNT(*) FROM routines WHERE status='Done'").fetchone()[0]
     miss = conn.execute("SELECT COUNT(*) FROM routines WHERE status='Miss'").fetchone()[0]
     percent = int(done / total * 100) if total else 0
 
-    rows = conn.execute(
-        "SELECT day, SUM(status='Done'), SUM(status='Miss') "
-        "FROM routines " + where +
-        " GROUP BY day ORDER BY day DESC LIMIT 7",
-        params
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT strftime('%m', day),
+               SUM(status='Done'),
+               SUM(status='Miss')
+        FROM routines
+        GROUP BY strftime('%m', day)
+        ORDER BY strftime('%m', day)
+    """).fetchall()
 
     conn.close()
 
-    days = [r[0] for r in rows][::-1]
-    done_data = [r[1] for r in rows][::-1]
-    miss_data = [r[2] for r in rows][::-1]
+    months = [r[0] for r in rows]
+    done_data = [r[1] for r in rows]
+    miss_data = [r[2] for r in rows]
 
-    html = f"""
+    return f"""
     <html>
     <head>
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -127,45 +117,21 @@ def dashboard(month: str = None, year: str = None):
         body {{ font-family:Segoe UI,Arial;background:#f4f6fb;padding:14px }}
         .card {{ background:#fff;border-radius:10px;padding:14px;margin-bottom:14px;
                  box-shadow:0 2px 6px rgba(0,0,0,.05) }}
-        table {{ width:100%;border-collapse:collapse }}
-        th {{ background:#eef2ff;padding:8px }}
-        td {{ padding:8px;border-bottom:1px solid #e5e7eb;text-align:center }}
       </style>
     </head>
     <body>
 
-    <h2>📊 Dashboard</h2>
+    <h2>📊 Year Dashboard</h2>
 
     <div class="card">
-      <b>Overall Discipline</b><br>
+      <b>Overall (Year)</b><br>
       <span style="font-size:24px;color:#2563eb;font-weight:bold">{percent}%</span><br>
       Total {total} | Done {done} | Miss {miss}
     </div>
 
     <div class="card">
-      <form method="get">
-        Month <input name="month" style="width:60px">
-        Year <input name="year" style="width:80px">
-        <button>Apply</button>
-      </form>
-      <br>
-      <a href="/overview">📊 View Year Overview</a>
-    </div>
-
-    <div class="card">
-      <canvas id="chart" style="max-height:220px"></canvas>
-    </div>
-
-    <div class="card">
-      <b>📜 History</b>
-      <table>
-        <tr><th>Day</th><th>Done</th><th>Miss</th><th>Detail</th></tr>
-        {''.join(
-            f"<tr><td>{d}</td><td>{dn}</td><td>{ms}</td>"
-            f"<td><a href='/detail/{d}'>🔍</a></td></tr>"
-            for d, dn, ms in rows
-        )}
-      </table>
+      <b>Performance by Month</b>
+      <canvas id="chart" style="max-height:260px"></canvas>
     </div>
 
     <div class="card">
@@ -176,17 +142,18 @@ def dashboard(month: str = None, year: str = None):
     new Chart(document.getElementById("chart"), {{
       type: "bar",
       data: {{
-        labels: {days},
+        labels: {months},
         datasets: [
           {{ label: "Done", data: {done_data}, backgroundColor: "#16a34a" }},
           {{ label: "Miss", data: {miss_data}, backgroundColor: "#dc2626" }}
         ]
       }},
       options: {{
+        plugins:{{legend:{{position:"bottom"}}}},
         onClick:(e,els)=>{{
           if(els.length>0){{
-            let i = els[0].index;
-            location = "/detail/" + {days}[i];
+            let m = {months}[els[0].index];
+            window.location = "/monthly/" + m;
           }}
         }}
       }}
@@ -195,37 +162,51 @@ def dashboard(month: str = None, year: str = None):
 
     </body></html>
     """
-    return html
 
 # =====================
-# YEAR OVERVIEW
+# MONTHLY OVERVIEW
 # =====================
-@app.get("/overview", response_class=HTMLResponse)
-def overview():
+@app.get("/monthly/{mon}", response_class=HTMLResponse)
+def monthly(mon: str):
     conn = sqlite3.connect(DB)
-    rows = conn.execute(
-        "SELECT strftime('%m', day), SUM(status='Done'), SUM(status='Miss') "
-        "FROM routines GROUP BY strftime('%m', day) ORDER BY strftime('%m', day)"
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT day,
+               SUM(status='Done'),
+               SUM(status='Miss')
+        FROM routines
+        WHERE strftime('%m', day)=?
+        GROUP BY day
+        ORDER BY day
+    """, (mon,)).fetchall()
     conn.close()
 
-    months = [r[0] for r in rows]
+    days = [r[0] for r in rows]
     done = [r[1] for r in rows]
     miss = [r[2] for r in rows]
 
     return f"""
     <html><body style="font-family:Segoe UI,Arial;padding:14px">
-    <h3>📊 Year Overview</h3>
-    <canvas id="y"></canvas>
+    <h3>📊 Month {mon}</h3>
+    <canvas id="m" style="max-height:260px"></canvas>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-    new Chart(document.getElementById("y"), {{
+    new Chart(document.getElementById("m"), {{
       type:"bar",
-      data:{{ labels:{months},
-              datasets:[
-                {{label:"Done",data:{done},backgroundColor:"green"}},
-                {{label:"Miss",data:{miss},backgroundColor:"red"}}
-              ]}}
+      data:{{
+        labels:{days},
+        datasets:[
+          {{label:"Done",data:{done},backgroundColor:"green"}},
+          {{label:"Miss",data:{miss},backgroundColor:"red"}}
+        ]
+      }},
+      options:{{
+        onClick:(e,els)=>{{
+          if(els.length>0){{
+            let i = els[0].index;
+            window.location = "/detail/" + {days}[i];
+          }}
+        }}
+      }}
     }});
     </script>
     <br><a href="/dashboard">⬅ Dashboard</a>
@@ -233,14 +214,13 @@ def overview():
     """
 
 # =====================
-# DETAIL (VIEW / EDIT / DELETE)
+# DETAIL / EDIT / DELETE
 # =====================
 @app.get("/detail/{day}", response_class=HTMLResponse)
 def detail(day: str):
     conn = sqlite3.connect(DB)
     rows = conn.execute(
-        "SELECT id,time,seq,routine,status FROM routines "
-        "WHERE day=? ORDER BY seq,time",
+        "SELECT id,time,seq,routine,status FROM routines WHERE day=? ORDER BY seq,time",
         (day,)
     ).fetchall()
     conn.close()
@@ -252,7 +232,7 @@ def detail(day: str):
     <tr><th>#</th><th>Time</th><th>Routine</th><th>Status</th><th>Action</th></tr>
     """
 
-    for rid, t, seq, r, s in rows:
+    for rid,t,seq,r,s in rows:
         html += f"""
         <tr>
           <td>{seq}</td>
@@ -271,13 +251,10 @@ def detail(day: str):
     html += "</table><br><a href='/dashboard'>⬅ Dashboard</a></body></html>"
     return html
 
-# =====================
-# EDIT
-# =====================
 @app.get("/edit/{rid}", response_class=HTMLResponse)
 def edit(rid: int):
     conn = sqlite3.connect(DB)
-    d, t, seq, r, s, n = conn.execute(
+    d,t,seq,r,s,n = conn.execute(
         "SELECT day,time,seq,routine,status,note FROM routines WHERE id=?",
         (rid,)
     ).fetchone()
@@ -316,15 +293,12 @@ def edit_save(
     conn = sqlite3.connect(DB)
     conn.execute(
         "UPDATE routines SET day=?,time=?,seq=?,routine=?,status=?,note=? WHERE id=?",
-        (day, time, seq, routine, status, note, rid)
+        (day,time,seq,routine,status,note,rid)
     )
     conn.commit()
     conn.close()
     return RedirectResponse("/detail/" + day, status_code=303)
 
-# =====================
-# DELETE
-# =====================
 @app.post("/delete/{rid}")
 def delete(rid: int):
     conn = sqlite3.connect(DB)
