@@ -1,0 +1,36 @@
+<form method="post" action="/save">
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Daily Routine</title>
+</head>
+<body>
+
+<h2>📝 บันทึกกิจวัตรรายวัน</h2>
+
+<form method="post" action="/save">
+
+    <label>วันที่:</label><br>
+    <input type="date" name="date" required><br><br>
+
+    <label>กิจวัตร:</label><br>
+    <input type="text" name="routine" required><br><br>
+
+    <label>สถานะ:</label><br>
+    <select name="status">
+        <option value="Done">Done</option>
+        <option value="Miss">Miss</option>
+    </select><br><br>
+
+    <label>หมายเหตุ:</label><br>
+    <textarea name="note" rows="4" cols="30"></textarea><br><br>
+
+    <button type="submit">บันทึก</button>
+
+</form>
+
+<br>
+<a href="/">⬅ กลับหน้า Dashboard</a>
+
+</body>
+</html>
