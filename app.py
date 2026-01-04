@@ -39,11 +39,12 @@ def root():
 def daily():
     today = date.today()
     return (
-        "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
-        "<body style='font-family:Segoe UI,Arial;padding:14px'>"
+        "<html><head>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "</head><body style='font-family:Segoe UI,Arial;padding:14px'>"
         "<h3>📝 Daily Routine</h3>"
         "<form method='post' action='/save'>"
-        f"วันที่:<br><input type='date' name='day' value='{today}'><br><br>"
+        f"วันที่:<br><input type='date' name='day' value='{today}' required><br><br>"
         "เวลา:<br><input type='time' name='time'><br><br>"
         "ลำดับ:<br><input type='number' name='seq' value='1'><br><br>"
         "Routine:<br><input type='text' name='routine' required><br><br>"
@@ -61,7 +62,7 @@ def daily():
     )
 
 # =====================
-# SAVE
+# SAVE ROUTINE
 # =====================
 @app.post("/save")
 def save(
@@ -74,7 +75,8 @@ def save(
 ):
     conn = sqlite3.connect(DB)
     conn.execute(
-        "INSERT INTO routines (day,time,seq,routine,status,note) VALUES (?,?,?,?,?,?)",
+        "INSERT INTO routines (day,time,seq,routine,status,note) "
+        "VALUES (?,?,?,?,?,?)",
         (str(day), time, seq, routine, status, note)
     )
     conn.commit()
@@ -200,10 +202,59 @@ def detail(day: str):
 
     for rid,t,seq,r,s,n in rows:
         html += (
-            f"<tr><td>{seq}</td><td>{t}</td><td>{r}</td><td>{s}</td>"
+            f"<tr><td>{seq}</td><td>{t or ''}</td><td>{r}</td><td>{s}</td>"
             f"<td><a href='/edit/{rid}'>✏️</a></td></tr>"
         )
 
     html += "</table><br><a href='/dashboard'>⬅ Dashboard</a></body></html>"
     return html
 
+# =====================
+# EDIT
+# =====================
+@app.get("/edit/{rid}", response_class=HTMLResponse)
+def edit(rid: int):
+    conn = sqlite3.connect(DB)
+    d,t,sq,r,st,n = conn.execute(
+        "SELECT day,time,seq,routine,status,note FROM routines WHERE id=?",
+        (rid,)
+    ).fetchone()
+    conn.close()
+
+    return (
+        "<html><body style='font-family:Segoe UI,Arial;padding:14px'>"
+        "<h3>✏️ Edit Routine</h3>"
+        "<form method='post'>"
+        f"วันที่:<br><input type='date' name='day' value='{d}'><br><br>"
+        f"เวลา:<br><input type='time' name='time' value='{t or ''}'><br><br>"
+        f"ลำดับ:<br><input type='number' name='seq' value='{sq}'><br><br>"
+        f"Routine:<br><input type='text' name='routine' value='{r}'><br><br>"
+        "Status:<br>"
+        "<select name='status'>"
+        f"<option {'selected' if st=='Planned' else ''}>Planned</option>"
+        f"<option {'selected' if st=='Done' else ''}>Done</option>"
+        f"<option {'selected' if st=='Miss' else ''}>Miss</option>"
+        "</select><br><br>"
+        f"Note:<br><textarea name='note'>{n or ''}</textarea><br><br>"
+        "<button type='submit'>Save</button>"
+        "</form></body></html>"
+    )
+
+@app.post("/edit/{rid}")
+def edit_save(
+    rid: int,
+    day: str = Form(...),
+    time: str = Form(""),
+    seq: int = Form(1),
+    routine: str = Form(...),
+    status: str = Form(...),
+    note: str = Form("")
+):
+    conn = sqlite3.connect(DB)
+    conn.execute(
+        "UPDATE routines SET day=?,time=?,seq=?,routine=?,status=?,note=? WHERE id=?",
+        (day,time,seq,routine,status,note,rid)
+    )
+    conn.commit()
+    conn.close()
+    return RedirectResponse("/detail/" + day, status_code=303)
