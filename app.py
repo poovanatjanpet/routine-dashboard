@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Form, Query
+from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 import sqlite3
 from datetime import date
@@ -14,7 +14,7 @@ def root():
     return RedirectResponse("/dashboard")
 
 # =========================
-# DB INIT
+# INIT DB
 # =========================
 def init_db():
     conn = sqlite3.connect(DB)
@@ -34,52 +34,31 @@ def init_db():
 init_db()
 
 # =========================
-# DAILY
+# DAILY ADD
 # =========================
 @app.get("/daily", response_class=HTMLResponse)
 def daily():
     return """
-    <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Daily Routine</title>
-    </head>
-    <body style="font-family:Arial;padding:15px">
-      <h3>📝 Daily Routine</h3>
-
-      <form method="post" action="/save">
-        วันที่:<br>
-        <input type="date" name="day" required><br><br>
-
-        เวลา:<br>
-        <input type="time" name="time"><br><br>
-
-        ลำดับ:<br>
-        <input type="number" name="seq" value="1"><br><br>
-
-        Routine:<br>
-        <input type="text" name="routine" required><br><br>
-
-        Status:<br>
-        <select name="status">
-          <option>Planned</option>
-          <option>Done</option>
-          <option>Miss</option>
-        </select><br><br>
-
-        Note:<br>
-        <textarea name="note"></textarea><br><br>
-
-        <button type="submit"
-          onclick="this.disabled=true;this.innerText='Saving...';this.form.submit();">
-          Save
-        </button>
-      </form>
-
-      <br>
-      <a href="/dashboard">⬅ Dashboard</a>
-    </body>
-    </html>
+    <h3>📝 Daily Routine</h3>
+    <form method="post" action="/save">
+      วันที่:<br><input type="date" name="day" required><br><br>
+      เวลา:<br><input type="time" name="time"><br><br>
+      ลำดับ:<br><input type="number" name="seq" value="1"><br><br>
+      Routine:<br><input type="text" name="routine" required><br><br>
+      Status:<br>
+      <select name="status">
+        <option>Planned</option>
+        <option>Done</option>
+        <option>Miss</option>
+      </select><br><br>
+      Note:<br><textarea name="note"></textarea><br><br>
+      <button type="submit"
+        onclick="this.disabled=true;this.innerText='Saving...';this.form.submit();">
+        Save
+      </button>
+    </form>
+    <br>
+    <a href="/dashboard">⬅ Dashboard</a>
     """
 
 # =========================
@@ -96,7 +75,7 @@ def save(
 ):
     conn = sqlite3.connect(DB)
     conn.execute("""
-        INSERT INTO routines (day, time, seq, routine, status, note)
+        INSERT INTO routines (day,time,seq,routine,status,note)
         VALUES (?,?,?,?,?,?)
     """, (str(day), time, seq, routine, status, note))
     conn.commit()
@@ -106,17 +85,6 @@ def save(
 @app.get("/save")
 def save_get():
     return RedirectResponse("/daily")
-
-# =========================
-# DELETE
-# =========================
-@app.post("/delete/{rid}")
-def delete(rid: int):
-    conn = sqlite3.connect(DB)
-    conn.execute("DELETE FROM routines WHERE id=?", (rid,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/dashboard", status_code=303)
 
 # =========================
 # DASHBOARD
@@ -131,25 +99,25 @@ def dashboard():
 
     percent = int(done / total * 100) if total else 0
 
-    daily = conn.execute("""
+    days = conn.execute("""
         SELECT day,
                SUM(status='Done'),
                SUM(status='Miss')
         FROM routines
         GROUP BY day
-        ORDER BY day
+        ORDER BY day DESC
+        LIMIT 7
     """).fetchall()
 
     conn.close()
 
-    labels = [d[0] for d in daily]
-    done_data = [d[1] for d in daily]
-    miss_data = [d[2] for d in daily]
+    labels = [d[0] for d in days][::-1]
+    done_data = [d[1] for d in days][::-1]
+    miss_data = [d[2] for d in days][::-1]
 
     return f"""
     <html>
     <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1">
       <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
       <style>
         body {{ font-family:Arial;background:#f4f6fa;padding:12px }}
@@ -168,7 +136,7 @@ def dashboard():
     </head>
     <body>
 
-    <h3>📊 Dashboard</h3>
+    <h2>📊 Dashboard</h2>
 
     <div class="card">
       <b>Overall Discipline</b>
@@ -179,36 +147,30 @@ def dashboard():
     </div>
 
     <div class="card">
-      <b>📈 Daily Performance</b>
-      <canvas id="dailyChart"></canvas>
+      <b>📈 Last 7 Days</b>
+      <canvas id="chart"></canvas>
     </div>
 
     <div class="card">
       <a href="/daily">➕ Add Routine</a>
     </div>
 
+    <div class="card">
+      <b>📅 History</b><br>
+      {"".join([f"<a href='/detail/{d[0]}'>{d[0]}</a><br>" for d in days])}
+    </div>
+
     <script>
-    new Chart(document.getElementById("dailyChart"), {{
+    new Chart(document.getElementById("chart"), {{
       type: 'bar',
       data: {{
         labels: {labels},
         datasets: [
-          {{
-            label: 'Done',
-            data: {done_data},
-            backgroundColor: '#16a34a'
-          }},
-          {{
-            label: 'Miss',
-            data: {miss_data},
-            backgroundColor: '#dc2626'
-          }}
+          {{ label: 'Done', data: {done_data}, backgroundColor: '#16a34a' }},
+          {{ label: 'Miss', data: {miss_data}, backgroundColor: '#dc2626' }}
         ]
       }},
-      options: {{
-        responsive:true,
-        plugins: {{ legend: {{ position:'bottom' }} }}
-      }}
+      options: {{ responsive:true }}
     }});
     </script>
 
@@ -217,34 +179,18 @@ def dashboard():
     """
 
 # =========================
-# DETAIL
+# DETAIL (VIEW / EDIT / DELETE)
 # =========================
 @app.get("/detail/{day}", response_class=HTMLResponse)
 def detail(day: str):
     conn = sqlite3.connect(DB)
     rows = conn.execute("""
-        SELECT id, seq, time, routine, status, note
+        SELECT id, time, seq, routine, status, note
         FROM routines
         WHERE day=?
         ORDER BY seq,time
     """,(day,)).fetchall()
     conn.close()
 
-    html=f"<h3>{day}</h3><table border=1 cellpadding=6>"
-    html+="<tr><th>#</th><th>Time</th><th>Routine</th><th>Status</th><th>Note</th><th>🗑</th></tr>"
-    for rid,seq,t,r,s,n in rows:
-        col="green" if s=="Done" else "red" if s=="Miss" else "gray"
-        html+=f"""
-        <tr>
-          <td>{seq}</td><td>{t or ""}</td><td>{r}</td>
-          <td style='color:{col}'>{s}</td><td>{n or ""}</td>
-          <td>
-            <form method="post" action="/delete/{rid}"
-              onsubmit="return confirm('Delete?');">
-              <button>ลบ</button>
-            </form>
-          </td>
-        </tr>
-        """
-    html+="</table><br><a href='/dashboard'>⬅ Back</a>"
-    return html
+    html = f"<h3>{day}</h3><table border=1 cellpadding=6>"
+    html += "<tr><th>#</th><th>Time</th><th>Routine</th><th>Status</th><th>Note</th><th>Action</th></tr>"
