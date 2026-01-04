@@ -39,12 +39,14 @@ def root():
 def daily():
     today = date.today()
     return (
+        "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head>"
+        "<body style='font-family:Segoe UI,Arial;padding:14px'>"
         "<h3>📝 Daily Routine</h3>"
         "<form method='post' action='/save'>"
         f"วันที่:<br><input type='date' name='day' value='{today}'><br><br>"
         "เวลา:<br><input type='time' name='time'><br><br>"
         "ลำดับ:<br><input type='number' name='seq' value='1'><br><br>"
-        "Routine:<br><input type='text' name='routine'><br><br>"
+        "Routine:<br><input type='text' name='routine' required><br><br>"
         "Status:<br>"
         "<select name='status'>"
         "<option>Planned</option>"
@@ -53,8 +55,9 @@ def daily():
         "</select><br><br>"
         "Note:<br><textarea name='note'></textarea><br><br>"
         "<button type='submit'>Save</button>"
-        "</form>"
-        "<br><a href='/dashboard'>⬅ Dashboard</a>"
+        "</form><br>"
+        "<a href='/dashboard'>⬅ Dashboard</a>"
+        "</body></html>"
     )
 
 # =====================
@@ -82,8 +85,14 @@ def save(
 # DASHBOARD
 # =====================
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
+def dashboard(month: int = None, year: int = None):
     conn = sqlite3.connect(DB)
+
+    where = ""
+    params = []
+    if month and year:
+        where = "WHERE strftime('%m', day)=? AND strftime('%Y', day)=?"
+        params = [f"{month:02d}", str(year)]
 
     total = conn.execute("SELECT COUNT(*) FROM routines").fetchone()[0]
     done = conn.execute("SELECT COUNT(*) FROM routines WHERE status='Done'").fetchone()[0]
@@ -92,27 +101,54 @@ def dashboard():
 
     rows = conn.execute(
         "SELECT day, SUM(status='Done'), SUM(status='Miss') "
-        "FROM routines GROUP BY day ORDER BY day DESC LIMIT 14"
+        "FROM routines "
+        + where +
+        " GROUP BY day ORDER BY day DESC LIMIT 7",
+        params
     ).fetchall()
 
     conn.close()
 
-    days = [r[0] for r in rows]
-    done_data = [r[1] for r in rows]
-    miss_data = [r[2] for r in rows]
+    days = [r[0] for r in rows][::-1]
+    done_data = [r[1] for r in rows][::-1]
+    miss_data = [r[2] for r in rows][::-1]
 
     html = (
         "<html><head>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<script src='https://cdn.jsdelivr.net/npm/chart.js'></script>"
-        "</head><body style='font-family:Arial;background:#f4f6fa;padding:12px'>"
+        "<style>"
+        "body{font-family:Segoe UI,Arial;background:#f4f6fb;padding:14px;margin:0}"
+        ".card{background:#fff;border-radius:10px;padding:14px;margin-bottom:14px;"
+        "box-shadow:0 2px 6px rgba(0,0,0,.05)}"
+        "table{width:100%;border-collapse:collapse;font-size:14px}"
+        "th{background:#eef2ff;padding:8px}"
+        "td{padding:8px;border-bottom:1px solid #e5e7eb;text-align:center}"
+        "</style></head><body>"
         "<h2>📊 Dashboard</h2>"
-        f"<p><b>Overall:</b> {percent}% | Total {total} | Done {done} | Miss {miss}</p>"
-        "<canvas id='chart'></canvas><br><br>"
-        "<h4>📅 เลือกวันย้อนหลัง</h4>"
-        "<input type='date' onchange=\"if(this.value)location='/detail/'+this.value\"><br><br>"
-        "<h4>📜 History</h4>"
-        "<table border='1' cellpadding='6'>"
+
+        "<div class='card'>"
+        "<div style='color:#6b7280'>Overall Discipline</div>"
+        f"<div style='font-size:24px;color:#2563eb;font-weight:bold'>{percent}%</div>"
+        f"Total {total} | Done {done} | Miss {miss}"
+        "</div>"
+
+        "<div class='card'>"
+        "<b>Filter</b><br><br>"
+        "<form method='get'>"
+        "Month <input type='number' name='month' min='1' max='12' style='width:60px'> "
+        "Year <input type='number' name='year' value='2026' style='width:80px'> "
+        "<button>Apply</button>"
+        "</form></div>"
+
+        "<div class='card'>"
+        "<b>Daily Performance</b><br><br>"
+        "<canvas id='chart' style='max-height:220px'></canvas>"
+        "</div>"
+
+        "<div class='card'>"
+        "<b>📜 History</b>"
+        "<table>"
         "<tr><th>Day</th><th>Done</th><th>Miss</th><th>Detail</th></tr>"
     )
 
@@ -123,18 +159,20 @@ def dashboard():
         )
 
     html += (
-        "</table><br>"
-        "<a href='/daily'>➕ Add Routine</a>"
+        "</table></div>"
+        "<div class='card'><a href='/daily'>➕ Add Routine</a></div>"
         "<script>"
-        "new Chart(document.getElementById('chart'), {"
+        "new Chart(document.getElementById('chart'),{"
         "type:'bar',"
-        "data:{labels:" + str(days[::-1]) + ",datasets:["
-        "{label:'Done',data:" + str(done_data[::-1]) + ",backgroundColor:'green'},"
-        "{label:'Miss',data:" + str(miss_data[::-1]) + ",backgroundColor:'red'}]},"
-        "options:{onClick:(e,els)=>{"
+        "data:{labels:" + str(days) + ",datasets:["
+        "{label:'Done',data:" + str(done_data) + ",backgroundColor:'#16a34a'},"
+        "{label:'Miss',data:" + str(miss_data) + ",backgroundColor:'#dc2626'}]},"
+        "options:{responsive:true,maintainAspectRatio:false,"
+        "plugins:{legend:{position:'bottom'}},"
+        "onClick:(e,els)=>{"
         "if(els.length>0){"
         "let i=els[0].index;"
-        "location='/detail/'+" + str(days[::-1]) + "[i];}}}});"
+        "location='/detail/'+" + str(days) + "[i];}}}});"
         "</script></body></html>"
     )
 
@@ -147,67 +185,25 @@ def dashboard():
 def detail(day: str):
     conn = sqlite3.connect(DB)
     rows = conn.execute(
-        "SELECT id,time,seq,routine,status,note FROM routines "
-        "WHERE day=? ORDER BY seq,time",
+        "SELECT id,time,seq,routine,status,note "
+        "FROM routines WHERE day=? ORDER BY seq,time",
         (day,)
     ).fetchall()
     conn.close()
 
-    html = f"<h3>📅 {day}</h3><table border='1' cellpadding='6'>"
-    html += "<tr><th>#</th><th>Time</th><th>Routine</th><th>Status</th><th>Action</th></tr>"
+    html = (
+        f"<html><body style='font-family:Segoe UI,Arial;padding:14px'>"
+        f"<h3>📅 {day}</h3>"
+        "<table border='1' cellpadding='6' style='border-collapse:collapse'>"
+        "<tr><th>#</th><th>Time</th><th>Routine</th><th>Status</th><th>Action</th></tr>"
+    )
+
     for rid,t,seq,r,s,n in rows:
         html += (
             f"<tr><td>{seq}</td><td>{t}</td><td>{r}</td><td>{s}</td>"
             f"<td><a href='/edit/{rid}'>✏️</a></td></tr>"
         )
-    html += "</table><br><a href='/dashboard'>⬅ Back</a>"
+
+    html += "</table><br><a href='/dashboard'>⬅ Dashboard</a></body></html>"
     return html
 
-# =====================
-# EDIT
-# =====================
-@app.get("/edit/{rid}", response_class=HTMLResponse)
-def edit(rid: int):
-    conn = sqlite3.connect(DB)
-    d,t,sq,r,st,n = conn.execute(
-        "SELECT day,time,seq,routine,status,note FROM routines WHERE id=?",
-        (rid,)
-    ).fetchone()
-    conn.close()
-
-    return (
-        "<h3>✏️ Edit Routine</h3>"
-        "<form method='post'>"
-        f"วันที่:<br><input type='date' name='day' value='{d}'><br><br>"
-        f"เวลา:<br><input type='time' name='time' value='{t}'><br><br>"
-        f"ลำดับ:<br><input type='number' name='seq' value='{sq}'><br><br>"
-        f"Routine:<br><input type='text' name='routine' value='{r}'><br><br>"
-        "Status:<br>"
-        "<select name='status'>"
-        f"<option {'selected' if st=='Planned' else ''}>Planned</option>"
-        f"<option {'selected' if st=='Done' else ''}>Done</option>"
-        f"<option {'selected' if st=='Miss' else ''}>Miss</option>"
-        "</select><br><br>"
-        f"Note:<br><textarea name='note'>{n}</textarea><br><br>"
-        "<button>Save</button>"
-        "</form>"
-    )
-
-@app.post("/edit/{rid}")
-def edit_save(
-    rid: int,
-    day: str = Form(...),
-    time: str = Form(""),
-    seq: int = Form(1),
-    routine: str = Form(...),
-    status: str = Form(...),
-    note: str = Form("")
-):
-    conn = sqlite3.connect(DB)
-    conn.execute(
-        "UPDATE routines SET day=?,time=?,seq=?,routine=?,status=?,note=? WHERE id=?",
-        (day,time,seq,routine,status,note,rid)
-    )
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/detail/" + day, status_code=303)
