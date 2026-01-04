@@ -248,4 +248,3 @@ def detail(day: str):
         """
     html+="</table><br><a href='/dashboard'>⬅ Back</a>"
     return html
-
